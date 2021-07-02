@@ -1,0 +1,75 @@
+version: '3'
+
+services:
+  mongo:
+    image: mongo
+    tty: true
+    volumes:
+      - ./local/mongo:/data/db
+    restart: on-failure
+
+  redis:
+    image: redis
+    volumes:
+      - ./local/redis:/data
+    command: redis-server --appendonly yes
+    restart: on-failure
+
+  api:
+    image: obs-api
+    build:
+      context: ./api
+    volumes:
+      - ./local/api-data:/data
+      - ./api/config.json:/opt/obs/api/config.json
+    environment:
+      - MONGODB_URL=mongo://mongo/obs
+    restart: on-failure
+    labels:
+      - traefik.http.routers.obsapi.rule=Host(`api.example.com`)
+      - traefik.http.routers.obsapi.entrypoints=websecure
+      - traefik.http.routers.obsapi.tls=true
+      - traefik.http.routers.obsapi.tls.certresolver=leresolver
+
+  worker:
+    image: obs-api
+    build:
+      context: ./api
+    volumes:
+      - ./local/api-data:/data
+      - ./api/config.json:/opt/obs/api/config.json
+    links:
+      - mongo
+      - redis
+    restart: on-failure
+    command:
+      - npm
+      - run
+      - start:worker
+
+  frontend:
+    image: obs-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile-prod
+    links:
+      - api
+    restart: on-failure
+    labels:
+      - traefik.http.routers.obsfrontend.rule=Host(`portal.example.com`)
+      - traefik.http.routers.obsfrontend.entrypoints=websecure
+      - traefik.http.routers.obsfrontend.tls=true
+      - traefik.http.routers.obsfrontend.tls.certresolver=leresolver
+
+  traefik:
+    image: traefik:2.4
+    ports:
+      - "80:80"
+      - "443:443"
+      # The Web UI (enabled by [api] in traefik.toml)
+      # - "8080:8080"
+    volumes:
+      # So that Traefik can listen to the Docker events
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik/traefik.toml:/traefik.toml
+#      - "./traefik/acme.json:/acme.json"
